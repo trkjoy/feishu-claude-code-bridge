@@ -30,6 +30,88 @@ npm i -g lark-channel-bridge
 pnpm add -g lark-channel-bridge
 ```
 
+## 从源码编译并使用
+
+如果你改了本地源码，想运行**当前仓库这份新构建**，而不是某个旧的全局安装，先执行：
+
+```bash
+pnpm typecheck
+pnpm build
+```
+
+编译产物会写到 `dist/`：
+
+- `dist/cli.js`：编译后的 CLI 入口
+- `dist/index.js` / `dist/index.d.ts`：库入口
+
+`bin/lark-channel-bridge.mjs` **不是**每次编译重新生成的产物。它是仓库里自带的一个很小的启动壳，只负责 `import ../dist/cli.js`。
+
+### 直接运行当前仓库刚编译出来的版本
+
+如果你只是想验证本地改动是否生效，不想动全局安装，直接运行：
+
+```bash
+node .\bin\lark-channel-bridge.mjs run
+```
+
+### 继续使用 `lark-channel-bridge run`
+
+如果你希望继续用平时的全局命令：
+
+```bash
+lark-channel-bridge run
+```
+
+那就需要把当前仓库这份新构建重新安装成全局版本。
+
+方式 A：直接从当前工作区全局安装
+
+```bash
+npm install -g .
+```
+
+方式 B：先打成 tgz，再安装这个确定的构建产物
+
+```bash
+npm pack
+npm install -g .\lark-channel-bridge-<version>.tgz
+```
+
+安装完成后，再运行：
+
+```bash
+lark-channel-bridge run
+```
+
+此时走的就是你刚安装的新版本。
+
+### 如何确认当前跑的是哪一份
+
+Windows 下可以先看命令实际指向哪里：
+
+```bash
+where lark-channel-bridge
+```
+
+如果这里指向的是 npm / nvm 的全局路径，那么 `lark-channel-bridge run` 用的就是全局安装，不是当前仓库目录。
+
+如果想确认某个源码改动已经进了编译产物，可以直接查 `dist/cli.js`：
+
+```bash
+rg "im.message.message_read_v1|read.message-read" dist/cli.js
+```
+
+对本次 `message_read_v1` 读回执功能，最直接的生效验证是：
+
+1. 启动刚编译出来的新版本。
+2. 让 bot 给某个飞书 / Lark 单聊用户发一条回复。
+3. 在飞书 / Lark 客户端里打开并读掉这条消息。
+4. 终端里应看到类似：
+
+```text
+· [read.message-read] readerOpenId=ou_xxx messageIds=["om_xxx"]
+```
+
 ## 首次启动
 
 ```bash

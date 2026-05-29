@@ -30,6 +30,80 @@ npm i -g lark-channel-bridge
 pnpm add -g lark-channel-bridge
 ```
 
+## Build from source
+
+If you changed the source locally and want to run **this repo's build** instead of an older global install:
+
+```bash
+pnpm typecheck
+pnpm build
+```
+
+Compiled artifacts are written to `dist/`:
+
+- `dist/cli.js` — compiled CLI entry
+- `dist/index.js` / `dist/index.d.ts` — library entry
+
+`bin/lark-channel-bridge.mjs` is **not** regenerated during build. It is a tiny checked-in wrapper that simply imports `../dist/cli.js`.
+
+### Run the freshly built local version
+
+Use this when you want to test the code in the current repo without touching your global install:
+
+```bash
+node ./bin/lark-channel-bridge.mjs run
+```
+
+### Keep using `lark-channel-bridge run`
+
+If you want the normal global command to use your current local changes, reinstall this build globally.
+
+Option A — install from the current working tree:
+
+```bash
+npm install -g .
+```
+
+Option B — create a tarball first, then install that exact artifact:
+
+```bash
+npm pack
+npm install -g ./lark-channel-bridge-<version>.tgz
+```
+
+After that, the usual command uses the newly installed build:
+
+```bash
+lark-channel-bridge run
+```
+
+### Confirm which binary you are running
+
+On Windows:
+
+```bash
+where lark-channel-bridge
+```
+
+If that points to a global npm/nvm path, `lark-channel-bridge run` is using the global install, not the repo checkout.
+
+To confirm a specific source change made it into the build, inspect the compiled file:
+
+```bash
+rg "im.message.message_read_v1|read.message-read" dist/cli.js
+```
+
+For the `message_read_v1` handler specifically, a successful end-to-end check is:
+
+1. Start the freshly built bridge.
+2. Let the bot send a DM reply to a Feishu/Lark user.
+3. Open that reply in the Feishu/Lark client.
+4. Confirm the terminal prints a line like:
+
+```text
+· [read.message-read] readerOpenId=ou_xxx messageIds=["om_xxx"]
+```
+
 ## First run
 
 ```bash
