@@ -23,6 +23,7 @@ const STDOUT_INFO_ALLOWLIST = new Set<string>([
   'ws.reconnected',
   'intake.enter',
   'card.final',
+  'read.message-read',
 ]);
 
 /**

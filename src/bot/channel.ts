@@ -39,6 +39,7 @@ import { ChatModeCache, type ChatMode } from './chat-mode-cache';
 import { handleCommentMention } from './comments';
 import { expandInteractiveCard } from './interactive-card';
 import { startKeepalive } from './keepalive';
+import { registerMessageReadHandler } from './message-read';
 import { configureNetwork } from './network-config';
 import { PendingQueue } from './pending-queue';
 import { ProcessPool } from './process-pool';
@@ -174,6 +175,7 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
   };
 
   const channel = createLarkChannel(opts);
+  registerMessageReadHandler(channel);
   const media = new MediaCache(channel);
 
   // Pending → run handoff: while a run is active on a chat, block its pending
