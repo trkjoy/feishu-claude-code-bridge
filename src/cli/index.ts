@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import pkg from '../../package.json';
+import { runAsk } from './commands/ask';
 import { runMigrate } from './commands/migrate';
 import { runKillCli, runPs } from './commands/ps';
 import {
@@ -34,6 +35,28 @@ program
   .action(async (opts: { config?: string; skipCheckLarkCli?: boolean }) => {
     await runStart(opts);
   });
+
+program
+  .command('ask')
+  .description('Internal bridge command: send an interactive question card and wait for the answer')
+  .option('-c, --config <path>', 'path to config file')
+  .requiredOption('--chat-id <id>', 'target Feishu/Lark chat_id')
+  .requiredOption('--operator-open-id <id>', 'expected answering user open_id')
+  .requiredOption('--question <text>', 'question shown to the user')
+  .requiredOption('--options <json>', 'JSON array of options')
+  .option('--timeout-seconds <seconds>', 'max wait time before failing', (value) => Number(value))
+  .action(
+    async (opts: {
+      config?: string;
+      chatId: string;
+      operatorOpenId: string;
+      question: string;
+      options: string;
+      timeoutSeconds?: number;
+    }) => {
+      await runAsk(opts);
+    },
+  );
 
 program
   .command('ps')

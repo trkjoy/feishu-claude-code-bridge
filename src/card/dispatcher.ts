@@ -1,5 +1,7 @@
 import type { CardActionEvent, LarkChannel, NormalizedMessage } from '@larksuiteoapi/node-sdk';
 import type { AgentAdapter } from '../agent/types';
+import type { AskStore } from '../ask/store';
+import { createAskStore } from '../ask/store';
 import type { ActiveRuns } from '../bot/active-runs';
 import type { ChatModeCache } from '../bot/chat-mode-cache';
 import type { PendingQueue } from '../bot/pending-queue';
@@ -16,6 +18,7 @@ import type { WorkspaceStore } from '../workspace/store';
  * fields the agent might set.
  */
 const CLAUDE_CALLBACK_MARKER = '__claude_cb';
+const BRIDGE_ASK_MARKER = '__bridge_ask';
 
 export interface CardDispatchDeps {
   channel: LarkChannel;
@@ -27,6 +30,7 @@ export interface CardDispatchDeps {
   controls: Controls;
   pending: PendingQueue;
   chatModeCache: ChatModeCache;
+  askStore?: AskStore;
 }
 
 export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
@@ -68,6 +72,11 @@ export async function handleCardAction(deps: CardDispatchDeps): Promise<void> {
     log.info('cardAction', 'skip-not-allowed-chat', {
       chatId: chatId.slice(-6),
     });
+    return;
+  }
+
+  if (BRIDGE_ASK_MARKER in payload) {
+    await resolveBridgeAsk(deps, payload);
     return;
   }
 
@@ -177,6 +186,37 @@ function forwardToClaude(
     createTime: Date.now(),
   };
   deps.pending.push(scope, synthetic);
+}
+
+async function resolveBridgeAsk(
+  deps: CardDispatchDeps,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const askId = typeof payload.ask_id === 'string' ? payload.ask_id : '';
+  const optionValue = typeof payload.option_value === 'string' ? payload.option_value : '';
+  const optionLabel = typeof payload.option_label === 'string' ? payload.option_label : undefined;
+  if (!askId || !optionValue) {
+    log.warn('cardAction', 'ask-skip-malformed', {
+      hasAskId: Boolean(askId),
+      hasOptionValue: Boolean(optionValue),
+    });
+    return;
+  }
+
+  const askStore = deps.askStore ?? createAskStore();
+  const result = await askStore.answer({
+    askId,
+    operatorOpenId: deps.evt.operator.openId,
+    operatorName: deps.evt.operator.name,
+    optionValue,
+    optionLabel,
+  });
+
+  log.info('cardAction', `ask-${result.kind}`, {
+    askId,
+    optionValue,
+    operator: deps.evt.operator.openId.slice(-6),
+  });
 }
 
 /** Turn a button payload like {cmd:'ws.use', name:'proj-a'} into the arg

@@ -24,6 +24,9 @@ const STDOUT_INFO_ALLOWLIST = new Set<string>([
   'intake.enter',
   'card.final',
   'read.message-read',
+  'ask.created',
+  'ask.answered',
+  'cardAction.ask-answered',
 ]);
 
 /**

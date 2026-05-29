@@ -56,6 +56,7 @@ export interface StartOptions {
 
 export async function runStart(opts: StartOptions): Promise<void> {
   const configPath = opts.config ?? paths.configFile;
+  process.env.LARK_CHANNEL_CONFIG = configPath;
   const existing = await loadConfig(configPath);
 
   let cfg: AppConfig;

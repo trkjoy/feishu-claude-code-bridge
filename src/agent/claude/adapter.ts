@@ -23,7 +23,7 @@ const WINDOWS_CLAUDE_EXE_SEGMENTS = [
   'claude.exe',
 ] as const;
 
-const BRIDGE_SYSTEM_PROMPT = `# lark-channel-bridge 运行约定
+const BRIDGE_SYSTEM_PROMPT_BASE = `# lark-channel-bridge 运行约定
 
 你正在 lark-channel-bridge 里跑：把飞书/Lark 用户消息桥到本地 \`claude\` CLI。
 
@@ -111,6 +111,28 @@ sender_name: ...
 4. 你前台阻塞期间，用户发的新消息 bridge 会自动排队，**不会打断你**；等你 tool_result 一回来，下一批消息再进来。所以放心阻塞。
 5. 如果用户中途想取消，他们会发 \`/stop\`——那时被 kill 是预期行为，不用兜底。
 `;
+
+const BRIDGE_ASK_PROMPT = `
+
+## AskUserQuestion 替代方案
+
+在飞书里如果你需要用户做二选一 / 多选一，不要使用内建的 AskUserQuestion。改用 bridge 自己的阻塞命令：
+
+\`\`\`
+lark-channel-bridge ask --chat-id <bridge_context.chat_id> --operator-open-id <bridge_context.sender_id> --question "..." --options '[{"value":"a","label":"方案 A"},{"value":"b","label":"方案 B"}]'
+\`\`\`
+
+规则：
+
+1. 只有在你确实需要用户选择时才调用它。
+2. \`chat_id\` 用 \`bridge_context.chat_id\`，\`operator-open-id\` 用 \`bridge_context.sender_id\`。
+3. \`--options\` 必须是 JSON 数组，至少 2 个选项；每个选项包含 \`value\` 和 \`label\`。
+4. 这个命令会阻塞，直到用户点击卡片按钮，然后 stdout 返回一行 JSON，例如：
+   \`{"id":"ask_xxx","value":"b","label":"方案 B","operatorOpenId":"ou_xxx"}\`
+5. 收到 JSON 后继续当前任务，不要再让用户重复发送一条新消息。
+`;
+
+const BRIDGE_SYSTEM_PROMPT = `${BRIDGE_SYSTEM_PROMPT_BASE}\n${BRIDGE_ASK_PROMPT}`;
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly id = 'claude';
