@@ -1,5 +1,7 @@
 import type { ChildProcessByStdio } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { delimiter, dirname, extname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 import { log } from '../../core/logger';
@@ -11,6 +13,15 @@ export interface ClaudeAdapterOptions {
 }
 
 type ClaudeChild = ChildProcessByStdio<null, Readable, Readable>;
+
+const WINDOWS_PATH_EXTENSIONS = ['.exe', '.cmd', '.bat', ''] as const;
+const WINDOWS_CLAUDE_EXE_SEGMENTS = [
+  'node_modules',
+  '@anthropic-ai',
+  'claude-code',
+  'bin',
+  'claude.exe',
+] as const;
 
 const BRIDGE_SYSTEM_PROMPT = `# lark-channel-bridge 运行约定
 
@@ -106,14 +117,16 @@ export class ClaudeAdapter implements AgentAdapter {
   readonly displayName = 'Claude Code';
 
   private readonly binary: string;
+  private readonly resolvedBinary: string;
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.binary = opts.binary ?? 'claude';
+    this.resolvedBinary = resolveClaudeBinaryForSpawn(this.binary);
   }
 
   async isAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
-      const child = spawn(this.binary, ['--version'], { stdio: 'ignore' });
+      const child = spawn(this.resolvedBinary, ['--version'], { stdio: 'ignore' });
       child.on('error', () => resolve(false));
       child.on('exit', (code) => resolve(code === 0));
     });
@@ -134,7 +147,7 @@ export class ClaudeAdapter implements AgentAdapter {
     if (opts.sessionId) args.push('--resume', opts.sessionId);
     if (opts.model) args.push('--model', opts.model);
 
-    const child = spawn(this.binary, args, {
+    const child = spawn(this.resolvedBinary, args, {
       cwd: opts.cwd,
       env: { ...process.env, LARK_CHANNEL: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -223,6 +236,50 @@ export class ClaudeAdapter implements AgentAdapter {
       },
     };
   }
+}
+
+export function resolveClaudeBinaryForSpawn(
+  binary: string,
+  opts: {
+    platform?: NodeJS.Platform;
+    envPath?: string;
+  } = {},
+): string {
+  const platform = opts.platform ?? process.platform;
+  if (platform !== 'win32') return binary;
+
+  const found = findWindowsBinary(binary, opts.envPath ?? process.env.PATH ?? '');
+  if (!found) return binary;
+
+  if (extname(found).toLowerCase() === '.exe') return found;
+
+  const shimTarget = join(dirname(found), ...WINDOWS_CLAUDE_EXE_SEGMENTS);
+  return existsSync(shimTarget) ? shimTarget : binary;
+}
+
+function findWindowsBinary(binary: string, envPath: string): string | undefined {
+  const names = candidateBinaryNames(binary);
+  const roots = isPathLike(binary)
+    ? ['']
+    : envPath.split(delimiter).map((part) => part.trim()).filter(Boolean);
+
+  for (const root of roots) {
+    for (const name of names) {
+      const candidate = root ? join(root, name) : name;
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+function candidateBinaryNames(binary: string): string[] {
+  if (extname(binary)) return [binary];
+
+  return WINDOWS_PATH_EXTENSIONS.map((suffix) => `${binary}${suffix}`);
+}
+
+function isPathLike(binary: string): boolean {
+  return /[\\/]/.test(binary);
 }
 
 async function* createEventStream(
