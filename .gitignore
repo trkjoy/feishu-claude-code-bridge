@@ -17,3 +17,5 @@ coverage/
 scripts/
 tests-smoke/
 CHANGELOG.md
+.claude/
+CLAUDE.md
