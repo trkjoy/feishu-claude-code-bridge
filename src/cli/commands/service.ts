@@ -143,12 +143,20 @@ async function reportConnectAfter(
  * still carries its pre-migration id). Only matched once `botName` is filled,
  * i.e. after the WS handshake.
  */
-function findLiveEntry(botId: string, appId?: string): ProcessEntry | undefined {
-  const live = readAndPrune();
+/** Pure matcher behind {@link findLiveEntry}; exported for unit testing. */
+export function pickLiveEntry(
+  entries: ProcessEntry[],
+  botId: string,
+  appId?: string,
+): ProcessEntry | undefined {
   return (
-    live.find((e) => e.botId === botId && Boolean(e.botName)) ??
-    (appId ? live.find((e) => e.appId === appId && Boolean(e.botName)) : undefined)
+    entries.find((e) => e.botId === botId && Boolean(e.botName)) ??
+    (appId ? entries.find((e) => e.appId === appId && Boolean(e.botName)) : undefined)
   );
+}
+
+function findLiveEntry(botId: string, appId?: string): ProcessEntry | undefined {
+  return pickLiveEntry(readAndPrune(), botId, appId);
 }
 
 /**

@@ -160,14 +160,31 @@ export async function ensureDefaultBotEntry(
  * launcher referencing a bot id that no longer resolves). Drive it from the
  * CLI service commands, which then delete the orphaned service.
  */
-export async function migrateDefaultBotId(): Promise<{ oldId: string } | null> {
-  const bots = await listBots();
-  const def = bots.find((b) => b.configPath === paths.configFile);
+/**
+ * Pure decision core for {@link migrateDefaultBotId}: given the current
+ * entries and the default config path, decide whether (and how) to rename a
+ * legacy random-hex default-bot id to 'default'. Returns the rewritten entry
+ * list plus the old id, or null when nothing should change. No I/O — unit
+ * tested directly.
+ */
+export function planDefaultBotIdMigration(
+  entries: BotEntry[],
+  configFile: string,
+): { entries: BotEntry[]; oldId: string } | null {
+  const def = entries.find((b) => b.configPath === configFile);
   if (!def || def.id === DEFAULT_BOT_ID) return null;
-  if (bots.some((b) => b.id === DEFAULT_BOT_ID)) return null;
+  if (entries.some((b) => b.id === DEFAULT_BOT_ID)) return null;
   const oldId = def.id;
-  const next = bots.map((b) => (b.id === oldId ? { ...b, id: DEFAULT_BOT_ID } : b));
-  await writeAtomic(next, paths.botsFile);
-  log.info('bot-registry', 'default-id-migrated', { oldId });
-  return { oldId };
+  return {
+    entries: entries.map((b) => (b.id === oldId ? { ...b, id: DEFAULT_BOT_ID } : b)),
+    oldId,
+  };
+}
+
+export async function migrateDefaultBotId(): Promise<{ oldId: string } | null> {
+  const plan = planDefaultBotIdMigration(await listBots(), paths.configFile);
+  if (!plan) return null;
+  await writeAtomic(plan.entries, paths.botsFile);
+  log.info('bot-registry', 'default-id-migrated', { oldId: plan.oldId });
+  return { oldId: plan.oldId };
 }

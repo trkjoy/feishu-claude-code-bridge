@@ -46,7 +46,7 @@ async function writeLauncherCmd(botId?: string): Promise<void> {
   await writeFile(cmdPath, content, 'utf8');
 }
 
-interface SchtasksResult {
+export interface SchtasksResult {
   ok: boolean;
   stderr: string;
   stdout: string;
@@ -94,16 +94,25 @@ export function enableTask(botId?: string): SchtasksResult {
   return runSchtasks(['/Change', '/TN', windowsTaskName(botId), '/Enable']);
 }
 
-export function endAndDisable(botId?: string): SchtasksResult {
-  const ended = endTask(botId);
-  const disabled = disableTask(botId);
-  // Both must succeed: /End stops the running process, /Disable prevents the
-  // ONLOGON autostart from bringing it back. Surface the first failure with
-  // its own stderr. The old `disabled.ok ? disabled : ended.ok ? disabled :
-  // ended` masked an /End failure whenever /Disable happened to succeed —
-  // reporting stop "ok" while the daemon was still running.
+/**
+ * Combine the /End + /Disable results into one stop result. Both must
+ * succeed: /End stops the running process, /Disable prevents the ONLOGON
+ * autostart from bringing it back. Surface the first failure — /End first,
+ * since a failed /End means the daemon is still running (the more urgent
+ * signal). The old `disabled.ok ? disabled : ended.ok ? disabled : ended`
+ * masked an /End failure whenever /Disable happened to succeed, reporting
+ * stop "ok" while the daemon was still alive. Pure (no spawn) for testing.
+ */
+export function combineEndDisable(
+  ended: SchtasksResult,
+  disabled: SchtasksResult,
+): SchtasksResult {
   if (!ended.ok) return ended;
   return disabled;
+}
+
+export function endAndDisable(botId?: string): SchtasksResult {
+  return combineEndDisable(endTask(botId), disableTask(botId));
 }
 
 export async function restartTask(botId?: string): Promise<SchtasksResult> {
