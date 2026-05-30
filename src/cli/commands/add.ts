@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { runRegistrationWizard } from '../../bot/wizard';
-import { registerBot } from '../../bot/bot-registry';
+import { getBot, registerBot } from '../../bot/bot-registry';
 import { configPathFor } from '../../config/paths';
 import { setSecret } from '../../config/keystore';
 import {
@@ -13,10 +13,33 @@ export interface AddOptions {
   name?: string;
 }
 
+/**
+ * Resolve a bot id BEFORE we write any secret / config to disk. Catching a
+ * collision up front avoids the failure mode where setSecret + saveConfig
+ * already ran (saveConfig would clobber an existing bot's config-<id>.json)
+ * and only then registerBot throws on the duplicate id, orphaning the write.
+ */
+async function resolveBotId(name?: string): Promise<string> {
+  if (name) {
+    if (await getBot(name)) {
+      throw new Error(`bot id "${name}" 已存在。换一个 --name，或先 \`ps\` 查看已有 bot。`);
+    }
+    return name;
+  }
+  // Auto id: retry on the (1/65536) hex collision so we never proceed with
+  // an id that already maps to a configured bot.
+  for (let i = 0; i < 10; i++) {
+    const id = randomBytes(2).toString('hex');
+    if (!(await getBot(id))) return id;
+  }
+  // Pathologically unlucky — widen the space as a last resort.
+  return randomBytes(4).toString('hex');
+}
+
 export async function runAdd(opts: AddOptions): Promise<void> {
   const cfg = await runRegistrationWizard();
 
-  const botId = opts.name?.trim() || randomBytes(2).toString('hex');
+  const botId = await resolveBotId(opts.name?.trim());
   const configPath = configPathFor(botId);
 
   // Encrypt the secret before writing to disk

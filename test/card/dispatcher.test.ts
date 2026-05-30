@@ -29,6 +29,10 @@ describe('handleCardAction', () => {
       activeRuns: {} as never,
       agent: {} as never,
       controls: {
+        // Operator is the bot creator → passes the cardAction access gate
+        // (isUserAllowed). Without this the dispatcher silently drops the
+        // click before reaching the ask / __claude_cb routing under test.
+        botOwnerId: 'ou_owner',
         cfg: {
           accounts: {
             app: { id: 'cli_123', secret: 'secret', tenant: 'feishu' },
@@ -72,6 +76,10 @@ describe('handleCardAction', () => {
       activeRuns: {} as never,
       agent: {} as never,
       controls: {
+        // Operator is the bot creator → passes the cardAction access gate
+        // (isUserAllowed). Without this the dispatcher silently drops the
+        // click before reaching the ask / __claude_cb routing under test.
+        botOwnerId: 'ou_owner',
         cfg: {
           accounts: {
             app: { id: 'cli_123', secret: 'secret', tenant: 'feishu' },

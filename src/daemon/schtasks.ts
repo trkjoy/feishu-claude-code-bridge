@@ -97,7 +97,13 @@ export function enableTask(botId?: string): SchtasksResult {
 export function endAndDisable(botId?: string): SchtasksResult {
   const ended = endTask(botId);
   const disabled = disableTask(botId);
-  return disabled.ok ? disabled : ended.ok ? disabled : ended;
+  // Both must succeed: /End stops the running process, /Disable prevents the
+  // ONLOGON autostart from bringing it back. Surface the first failure with
+  // its own stderr. The old `disabled.ok ? disabled : ended.ok ? disabled :
+  // ended` masked an /End failure whenever /Disable happened to succeed —
+  // reporting stop "ok" while the daemon was still running.
+  if (!ended.ok) return ended;
+  return disabled;
 }
 
 export async function restartTask(botId?: string): Promise<SchtasksResult> {

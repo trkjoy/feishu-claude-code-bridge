@@ -1,6 +1,6 @@
 import { ClaudeAdapter } from '../../agent/claude/adapter';
 import { isComplete } from '../../config/schema';
-import { getBot, listBots } from '../../bot/bot-registry';
+import { getBot, listBots, migrateDefaultBotId } from '../../bot/bot-registry';
 import { paths } from '../../config/paths';
 import { loadConfig } from '../../config/store';
 import { daemonStderrPath, daemonStdoutPath } from '../../daemon/paths';
@@ -28,8 +28,7 @@ function requireAdapter(cmdName: string, botId?: string): ServiceAdapter {
     console.error(
       `${cmdName}: 当前系统不支持后台运行。`,
     );
-    console.error('  目前支持: macOS (launchd) / Linux (systemd)');
-    console.error('  Windows 支持后续版本。');
+    console.error('  支持的平台: macOS (launchd) / Linux (systemd) / Windows (任务计划程序)');
     process.exit(1);
   }
   return adapter;
@@ -131,8 +130,54 @@ async function reportConnectAfter(
     return;
   }
   console.warn(`⚠ 已下发指令,但 30 秒内未观察到 bot 连接成功 (${verb})。`);
-  console.warn(`  查看日志: tail -f ${daemonStderrPath(botId)}`);
-  console.warn(`              tail -f ${daemonStdoutPath(botId)}`);
+  const tailHint = (p: string): string =>
+    process.platform === 'win32' ? `Get-Content -Wait -Tail 50 "${p}"` : `tail -f ${p}`;
+  console.warn(`  查看日志: ${tailHint(daemonStderrPath(botId))}`);
+  console.warn(`            ${tailHint(daemonStdoutPath(botId))}`);
+}
+
+/**
+ * Find the live process entry for a bot. Prefer an exact botId match (correct
+ * even when two bots share one Feishu app); fall back to appId for entries
+ * registered before botId tracking (or mid-migration, when the running daemon
+ * still carries its pre-migration id). Only matched once `botName` is filled,
+ * i.e. after the WS handshake.
+ */
+function findLiveEntry(botId: string, appId?: string): ProcessEntry | undefined {
+  const live = readAndPrune();
+  return (
+    live.find((e) => e.botId === botId && Boolean(e.botName)) ??
+    (appId ? live.find((e) => e.appId === appId && Boolean(e.botName)) : undefined)
+  );
+}
+
+/**
+ * Upgrade migration (run only from bulk `start`, never the daemon itself):
+ * older bridges registered the default bot (config.json) under a random hex
+ * id, so its OS service got a per-id name diverging from the bare-name
+ * service. Normalize the registry id to 'default' and delete the orphaned
+ * hex-named service. The subsequent bulk start then installs a single clean
+ * bare-name 'default' service (which also overwrites any legacy bare service,
+ * since they share a name — so no duplicate autostart survives).
+ *
+ * Safe here because we're the CLI, not a daemon launched by that service:
+ * stopping + deleting it just hands off to the fresh service start that
+ * follows.
+ */
+async function migrateLegacyDefaultBot(): Promise<void> {
+  const migrated = await migrateDefaultBotId();
+  if (!migrated) return;
+  console.log(`迁移: 默认 bot 归一到 id 'default'（原 ${migrated.oldId}）`);
+  const old = getServiceAdapter(migrated.oldId);
+  if (!old || !old.fileExists()) return;
+  try {
+    await Promise.resolve(old.stopAndDisableAutostart());
+    await old.waitUntilStopped().catch(() => false);
+    await old.deleteFile();
+    console.log(`  ✓ 已清理旧服务 (${migrated.oldId})`);
+  } catch (err) {
+    console.warn(`  ⚠ 清理旧服务时有警告: ${(err as Error).message}`);
+  }
 }
 
 // ── per-bot helpers (throw on error, no process.exit) ──────────────────
@@ -169,9 +214,7 @@ async function stopOneBot(botId: string): Promise<void> {
   const cfgPath = await resolveConfigPath(botId);
   const cfg = await loadConfig(cfgPath);
   const appId = cfg.accounts?.app?.id;
-  const entry = appId
-    ? readAndPrune().find((e) => e.appId === appId && Boolean(e.botName))
-    : undefined;
+  const entry = findLiveEntry(botId, appId);
 
   const r = await adapter.stopAndDisableAutostart();
   if (!r.ok) {
@@ -194,7 +237,13 @@ async function restartOneBot(botId: string): Promise<void> {
     await reportConnectAfter('restarted', adapter.restart, botId);
     return;
   }
-  await reportConnectAfter('started', adapter.start, botId);
+  // Stopped: a prior `stop` disabled autostart (schtasks /Disable, systemd
+  // disable). Don't call adapter.start() directly — on Windows that's
+  // `schtasks /Run`, which fails on (or at best doesn't re-enable) a disabled
+  // task. Go through startOneBot, which reinstalls the service first
+  // (schtasks /Create /F re-enables; systemd enable --now re-arms autostart)
+  // so a restart from stopped truly comes back and survives the next logon.
+  await startOneBot(botId);
 }
 
 async function statusOneBot(botId: string): Promise<void> {
@@ -204,9 +253,7 @@ async function statusOneBot(botId: string): Promise<void> {
   const cfgPath = await resolveConfigPath(botId);
   const cfg = await loadConfig(cfgPath);
   const appId = cfg.accounts?.app?.id;
-  const entry = appId
-    ? readAndPrune().find((e) => e.appId === appId && Boolean(e.botName))
-    : undefined;
+  const entry = findLiveEntry(botId, appId);
 
   const running = adapter.isRunning();
   if (!adapter.fileExists() && !running) {
@@ -266,6 +313,11 @@ export async function runServiceStart(opts: ServiceStartOptions = {}): Promise<v
     }
     return;
   }
+
+  // Bulk mode: normalize any legacy random-hex default bot id to 'default'
+  // (deleting its orphaned per-id service) before enumerating, so the loop
+  // installs a single clean bare-name 'default' service.
+  await migrateLegacyDefaultBot();
 
   // Bulk mode: start all registered bots.
   const bots = await listBots();
@@ -419,9 +471,7 @@ export async function runServiceStatus(botId?: string): Promise<void> {
     const cfgPath = await resolveConfigPath(botId);
     const cfg = await loadConfig(cfgPath);
     const appId = cfg.accounts?.app?.id;
-    const entry = appId
-      ? readAndPrune().find((e) => e.appId === appId && Boolean(e.botName))
-      : undefined;
+    const entry = findLiveEntry(botId, appId);
 
     const { pid, lastExit } = adapter.parseStatus(adapter.describeStatus());
 

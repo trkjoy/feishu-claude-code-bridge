@@ -172,10 +172,32 @@ async function readAskRecord(asksDir: string, id: string): Promise<AskRecord | u
 
 async function writeAskRecord(asksDir: string, record: AskRecord): Promise<void> {
   const target = askPath(asksDir, record.id);
-  const tmp = `${target}.tmp-${process.pid}`;
+  const tmp = `${target}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
   await mkdir(dirname(target), { recursive: true });
   await writeFile(tmp, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
-  await rename(tmp, target);
+  await renameWithRetry(tmp, target);
+}
+
+/**
+ * `waitForAnswer` polls the record file every few ms while `answer` rewrites
+ * it via tmp+rename. On Windows, MoveFileEx fails (EPERM/EACCES/EBUSY) if the
+ * destination is open in another handle at that instant — so the atomic
+ * rename can transiently lose the race with a concurrent reader. Retry a few
+ * times before surfacing the error, instead of rejecting the write (which, in
+ * the poll/answer flow, would otherwise bubble up as an unhandled rejection).
+ */
+async function renameWithRetry(from: string, to: string, attempts = 10): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const transient = code === 'EPERM' || code === 'EACCES' || code === 'EBUSY' || code === 'EEXIST';
+      if (i >= attempts || !transient) throw err;
+      await sleep(5);
+    }
+  }
 }
 
 async function sleep(ms: number): Promise<void> {
