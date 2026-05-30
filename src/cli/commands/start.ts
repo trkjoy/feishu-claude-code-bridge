@@ -28,6 +28,7 @@ import {
   updateEntry,
   type ProcessEntry,
 } from '../../runtime/registry';
+import { ensureDefaultBotEntry, getBot } from '../../bot/bot-registry';
 import { SessionStore } from '../../session/store';
 import { WorkspaceStore } from '../../workspace/store';
 
@@ -56,10 +57,24 @@ const MEDIA_GC_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export interface StartOptions {
   config?: string;
   skipCheckLarkCli?: boolean;
+  /** Bot id from --bot flag. */
+  bot?: string;
 }
 
 export async function runStart(opts: StartOptions): Promise<void> {
-  const configPath = opts.config ?? paths.configFile;
+  let configPath: string;
+  if (opts.config) {
+    configPath = opts.config;
+  } else if (opts.bot) {
+    const bot = await getBot(opts.bot);
+    if (!bot) {
+      console.error(`✗ 未找到 bot "${opts.bot}"。用 \`lark-channel-bridge ps\` 查看已配置的 bot。`);
+      process.exit(1);
+    }
+    configPath = bot.configPath;
+  } else {
+    configPath = paths.configFile;
+  }
   process.env.LARK_CHANNEL_CONFIG = configPath;
   const existing = await loadConfig(configPath);
 
@@ -118,6 +133,10 @@ export async function runStart(opts: StartOptions): Promise<void> {
     }
   }
 
+  // Auto-register default bot in the bot registry so first-time single-bot
+  // users show up in `ps` without running `add` first.
+  const resolvedBotId = opts.bot ?? await ensureDefaultBotEntry(cfg.accounts.app.id, cfg.accounts.app.tenant);
+
   // Register self in the process registry. Cleanup is wired via stop() and
   // 'exit' below — both paths run unregisterSync so stale entries don't
   // poison the next start.
@@ -126,6 +145,7 @@ export async function runStart(opts: StartOptions): Promise<void> {
     tenant: cfg.accounts.app.tenant,
     configPath,
     version: pkg.version,
+    botId: resolvedBotId,
   });
   log.info('registry', 'registered', { id: entry.id, pid: process.pid });
 

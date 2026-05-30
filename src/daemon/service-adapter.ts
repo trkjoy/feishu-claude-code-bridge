@@ -1,5 +1,5 @@
 import * as launchd from './launchd';
-import { WINDOWS_TASK_NAME, launchAgentPlistPath, systemdUnitPath } from './paths';
+import { launchAgentPlistPath, systemdUnitPath, windowsTaskName } from './paths';
 import * as schtasks from './schtasks';
 import * as systemd from './systemd';
 
@@ -8,75 +8,40 @@ export interface ServiceResult {
   stderr: string;
 }
 
-/** Some platforms' restart is sync (spawnSync), others (schtasks) are
- * naturally async. Adapter methods can return either; callers await. */
 export type ServiceResultLike = ServiceResult | Promise<ServiceResult>;
 
-/**
- * Platform-agnostic interface over OS service managers (launchd / systemd /
- * schtasks). All methods are best-effort idempotent — calling stop()
- * on an already-stopped service returns ok=true.
- */
 export interface ServiceAdapter {
-  /** Display name used in error / status messages. */
   readonly platformName: string;
 
-  /** Whether the service file (plist / unit / task) is on disk / registered. */
   fileExists(): boolean;
-
-  /** Whether the service is currently running (process alive). */
   isRunning(): boolean;
-
-  /** Path/name to the service definition (for status output). */
   servicePath(): string;
-
-  /** Write or overwrite the service definition. */
   install(): Promise<void>;
-
-  /** Start the service (enables autostart where applicable). */
   start(): ServiceResultLike;
-
-  /** Stop the service. Does NOT disable autostart on its own. */
   stop(): ServiceResultLike;
-
-  /** Stop + disable autostart. Used by `unregister` flow. */
   stopAndDisableAutostart(): ServiceResultLike;
-
-  /** Restart the running service in place. */
   restart(): ServiceResultLike;
-
-  /** Poll until the service is no longer running, or timeout. */
   waitUntilStopped(timeoutMs?: number): Promise<boolean>;
-
-  /** Remove the service definition from the OS. */
   deleteFile(): Promise<void>;
-
-  /** Raw status output from the underlying tool, for downstream parsing. */
   describeStatus(): string;
-
-  /**
-   * Extract pid / last exit code from `describeStatus()` text. Returns
-   * undefined for fields the platform doesn't expose or hasn't recorded yet.
-   */
   parseStatus(text: string): { pid?: string; lastExit?: string };
 }
 
-function makeLaunchdAdapter(): ServiceAdapter {
+function makeLaunchdAdapter(botId?: string): ServiceAdapter {
+  const bid = botId;
   return {
     platformName: 'launchd (macOS)',
-    fileExists: launchd.plistExists,
-    isRunning: launchd.isLoaded,
-    servicePath: launchAgentPlistPath,
-    install: launchd.writePlist,
-    start: launchd.bootstrap,
-    stop: launchd.bootout,
-    // launchd has no separate "disable" — bootout already removes the
-    // service from launchd, which also nukes KeepAlive / RunAtLoad.
-    stopAndDisableAutostart: launchd.bootout,
-    restart: launchd.kickstart,
-    waitUntilStopped: launchd.waitUntilUnloaded,
-    deleteFile: launchd.deletePlist,
-    describeStatus: launchd.describeService,
+    fileExists: () => launchd.plistExists(bid),
+    isRunning: () => launchd.isLoaded(bid),
+    servicePath: () => launchAgentPlistPath(bid),
+    install: () => launchd.writePlist(bid),
+    start: () => launchd.bootstrap(bid),
+    stop: () => launchd.bootout(bid),
+    stopAndDisableAutostart: () => launchd.bootout(bid),
+    restart: () => launchd.kickstart(bid),
+    waitUntilStopped: (t?: number) => launchd.waitUntilUnloaded(bid, t),
+    deleteFile: () => launchd.deletePlist(bid),
+    describeStatus: () => launchd.describeService(bid),
     parseStatus: (text) => ({
       pid: text.match(/pid\s*=\s*(\d+)/)?.[1],
       lastExit: text.match(/last exit code\s*=\s*(-?\d+)/i)?.[1],
@@ -84,31 +49,27 @@ function makeLaunchdAdapter(): ServiceAdapter {
   };
 }
 
-function makeSystemdAdapter(): ServiceAdapter {
+function makeSystemdAdapter(botId?: string): ServiceAdapter {
+  const bid = botId;
   return {
     platformName: 'systemd (Linux user)',
-    fileExists: systemd.unitExists,
-    isRunning: systemd.isActive,
-    servicePath: systemdUnitPath,
+    fileExists: () => systemd.unitExists(bid),
+    isRunning: () => systemd.isActive(bid),
+    servicePath: () => systemdUnitPath(bid),
     install: async () => {
-      await systemd.writeUnit();
-      // systemd needs daemon-reload after any unit file change.
+      await systemd.writeUnit(bid);
       systemd.daemonReload();
     },
-    start: systemd.enableAndStart,
-    stop: systemd.stop,
-    stopAndDisableAutostart: systemd.disableAndStop,
-    restart: systemd.restart,
-    waitUntilStopped: systemd.waitUntilInactive,
+    start: () => systemd.enableAndStart(bid),
+    stop: () => systemd.stop(bid),
+    stopAndDisableAutostart: () => systemd.disableAndStop(bid),
+    restart: () => systemd.restart(bid),
+    waitUntilStopped: (t?: number) => systemd.waitUntilInactive(bid, t),
     deleteFile: async () => {
-      await systemd.deleteUnit();
+      await systemd.deleteUnit(bid);
       systemd.daemonReload();
     },
-    describeStatus: systemd.describeService,
-    // `systemctl status` includes a "Main PID:" line and an "Active:"
-    // line. There's no single "last exit code" field in the standard
-    // output but the "Process: <pid> ExecStart=... status=<n>" line on
-    // an inactive service exposes it.
+    describeStatus: () => systemd.describeService(bid),
     parseStatus: (text) => ({
       pid: text.match(/Main PID:\s*(\d+)/)?.[1],
       lastExit: text.match(/Process:\s+\d+\s+ExecStart=.*status=(\d+)/)?.[1],
@@ -116,47 +77,37 @@ function makeSystemdAdapter(): ServiceAdapter {
   };
 }
 
-function makeSchtasksAdapter(): ServiceAdapter {
+function makeSchtasksAdapter(botId?: string): ServiceAdapter {
+  const bid = botId;
+  const taskName = () => windowsTaskName(bid);
   return {
     platformName: 'Task Scheduler (Windows)',
-    fileExists: schtasks.isTaskRegistered,
-    isRunning: schtasks.isTaskRunning,
-    // Windows doesn't have a single "service file" — there's the task
-    // registration (queryable via schtasks) and the launcher .cmd we wrote.
-    // The task name is what the user would search for in Task Scheduler UI.
-    servicePath: () => WINDOWS_TASK_NAME,
+    fileExists: () => schtasks.isTaskRegistered(bid),
+    isRunning: () => schtasks.isTaskRunning(bid),
+    servicePath: () => taskName(),
     install: async () => {
-      const r = await schtasks.installTask();
+      const r = await schtasks.installTask(bid);
       if (!r.ok) throw new Error(r.stderr || 'schtasks /Create failed');
     },
-    start: schtasks.runTask,
-    stop: schtasks.endTask,
-    stopAndDisableAutostart: schtasks.endAndDisable,
-    // schtasks has no native /Restart — adapter awaits end+wait+run.
-    restart: schtasks.restartTask,
-    waitUntilStopped: schtasks.waitUntilStopped,
+    start: () => schtasks.runTask(bid),
+    stop: () => schtasks.endTask(bid),
+    stopAndDisableAutostart: () => schtasks.endAndDisable(bid),
+    restart: () => schtasks.restartTask(bid),
+    waitUntilStopped: (t?: number) => schtasks.waitUntilStopped(bid, t),
     deleteFile: async () => {
-      await schtasks.deleteTask();
+      await schtasks.deleteTask(bid);
     },
-    describeStatus: schtasks.describeTask,
+    describeStatus: () => schtasks.describeTask(bid),
     parseStatus: (text) => ({
-      // `Process ID: <n>` shows up in verbose listing only when task is running.
       pid: text.match(/Process ID:\s*(\d+)/i)?.[1],
-      // `Last Result: <0|nonzero>` — `0` means last run succeeded.
-      // Filter the `1056` ("task already running") and `267011` ("task hasn't
-      // run") sentinels that aren't real exit codes.
       lastExit: text.match(/Last Result:\s*(\d+)/i)?.[1],
     }),
   };
 }
 
-/**
- * Return the right adapter for the current platform, or null if this OS
- * isn't supported. Callers should null-check and surface a friendly error.
- */
-export function getServiceAdapter(): ServiceAdapter | null {
-  if (process.platform === 'darwin') return makeLaunchdAdapter();
-  if (process.platform === 'linux') return makeSystemdAdapter();
-  if (process.platform === 'win32') return makeSchtasksAdapter();
+export function getServiceAdapter(botId?: string): ServiceAdapter | null {
+  if (process.platform === 'darwin') return makeLaunchdAdapter(botId);
+  if (process.platform === 'linux') return makeSystemdAdapter(botId);
+  if (process.platform === 'win32') return makeSchtasksAdapter(botId);
   return null;
 }

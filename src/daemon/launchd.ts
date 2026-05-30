@@ -4,51 +4,53 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
 import {
-  LAUNCH_AGENT_LABEL,
   daemonLogDir,
   daemonStderrPath,
   daemonStdoutPath,
+  launchAgentLabel,
   launchAgentPlistPath,
 } from './paths';
 
 export interface PlistInputs {
-  /** Absolute path to the node binary that should run the bridge. */
   nodePath: string;
-  /** Absolute path to the bridge CLI entry (the file currently executing). */
   bridgeEntryPath: string;
-  /** PATH for the daemon process — captured from current shell so child
-   * tools (lark-cli, claude) can be resolved by name. launchd defaults
-   * to a very minimal PATH otherwise. */
   envPath: string;
+  botId?: string;
 }
 
 export function buildPlist(inputs: PlistInputs): string {
+  const label = launchAgentLabel(inputs.botId);
   const escape = (s: string): string =>
     s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  const runArgs = inputs.botId && inputs.botId !== 'default'
+    ? `<string>run</string>
+        <string>--bot</string>
+        <string>${escape(inputs.botId)}</string>`
+    : '<string>run</string>';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>${LAUNCH_AGENT_LABEL}</string>
+    <string>${label}</string>
     <key>ProgramArguments</key>
     <array>
         <string>${escape(inputs.nodePath)}</string>
         <string>${escape(inputs.bridgeEntryPath)}</string>
-        <string>run</string>
+        ${runArgs}
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>${escape(daemonStdoutPath())}</string>
+    <string>${escape(daemonStdoutPath(inputs.botId))}</string>
     <key>StandardErrorPath</key>
-    <string>${escape(daemonStderrPath())}</string>
+    <string>${escape(daemonStderrPath(inputs.botId))}</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -59,7 +61,7 @@ export function buildPlist(inputs: PlistInputs): string {
 `;
 }
 
-export async function writePlist(): Promise<void> {
+export async function writePlist(botId?: string): Promise<void> {
   const bridgeEntryPath = process.argv[1];
   if (!bridgeEntryPath) {
     throw new Error('cannot determine bridge entry path (process.argv[1] is empty)');
@@ -68,23 +70,24 @@ export async function writePlist(): Promise<void> {
     nodePath: process.execPath,
     bridgeEntryPath,
     envPath: process.env.PATH ?? '',
+    botId,
   });
-  const plistPath = launchAgentPlistPath();
+  const plistPath = launchAgentPlistPath(botId);
   await mkdir(dirname(plistPath), { recursive: true });
   await mkdir(daemonLogDir(), { recursive: true });
   await writeFile(plistPath, content, 'utf8');
 }
 
-export function plistExists(): boolean {
-  return existsSync(launchAgentPlistPath());
+export function plistExists(botId?: string): boolean {
+  return existsSync(launchAgentPlistPath(botId));
 }
 
 function userTarget(): string {
   return `gui/${userInfo().uid}`;
 }
 
-function serviceTarget(): string {
-  return `${userTarget()}/${LAUNCH_AGENT_LABEL}`;
+function serviceTarget(botId?: string): string {
+  return `${userTarget()}/${launchAgentLabel(botId)}`;
 }
 
 interface LaunchctlResult {
@@ -102,51 +105,39 @@ function runLaunchctl(args: string[]): LaunchctlResult {
   };
 }
 
-export function bootstrap(): LaunchctlResult {
-  return runLaunchctl(['bootstrap', userTarget(), launchAgentPlistPath()]);
+export function bootstrap(botId?: string): LaunchctlResult {
+  return runLaunchctl(['bootstrap', userTarget(), launchAgentPlistPath(botId)]);
 }
 
-export function bootout(): LaunchctlResult {
-  return runLaunchctl(['bootout', serviceTarget()]);
+export function bootout(botId?: string): LaunchctlResult {
+  return runLaunchctl(['bootout', serviceTarget(botId)]);
 }
 
-/** kickstart -k: kill the running instance and start a new one. Service
- * must already be bootstrapped (loaded into launchd). */
-export function kickstart(): LaunchctlResult {
-  return runLaunchctl(['kickstart', '-k', serviceTarget()]);
+export function kickstart(botId?: string): LaunchctlResult {
+  return runLaunchctl(['kickstart', '-k', serviceTarget(botId)]);
 }
 
-/** `launchctl print <target>` returns 0 iff the service is loaded.
- * We discard the verbose stdout for the existence check. */
-export function isLoaded(): boolean {
-  const r = spawnSync('launchctl', ['print', serviceTarget()], {
+export function isLoaded(botId?: string): boolean {
+  const r = spawnSync('launchctl', ['print', serviceTarget(botId)], {
     stdio: ['ignore', 'ignore', 'ignore'],
   });
   return r.status === 0;
 }
 
-/**
- * launchctl bootout returns synchronously, but the actual unload is async
- * at the OS level — `isLoaded()` may still be true for a brief window
- * after. If you bootstrap during that window, launchd refuses with the
- * cryptic `Bootstrap failed: 5: Input/output error`. Poll until the
- * service is truly gone.
- */
-export async function waitUntilUnloaded(timeoutMs = 5000): Promise<boolean> {
+export async function waitUntilUnloaded(botId?: string, timeoutMs = 5000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!isLoaded()) return true;
+    if (!isLoaded(botId)) return true;
     await new Promise((r) => setTimeout(r, 200));
   }
   return false;
 }
 
-/** Returns the raw `launchctl print` output, parsed downstream. */
-export function describeService(): string {
-  const r = runLaunchctl(['print', serviceTarget()]);
+export function describeService(botId?: string): string {
+  const r = runLaunchctl(['print', serviceTarget(botId)]);
   return r.stdout || r.stderr || '';
 }
 
-export async function deletePlist(): Promise<void> {
-  await rm(launchAgentPlistPath(), { force: true });
+export async function deletePlist(botId?: string): Promise<void> {
+  await rm(launchAgentPlistPath(botId), { force: true });
 }

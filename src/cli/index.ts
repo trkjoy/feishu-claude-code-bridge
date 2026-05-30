@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import pkg from '../../package.json';
+import { runAdd } from './commands/add';
 import { runAsk } from './commands/ask';
 import { runMigrate } from './commands/migrate';
-import { runKillCli, runPs } from './commands/ps';
+import { runKillCli, runBotsList } from './commands/ps';
 import {
   runSecretsGet,
   runSecretsList,
@@ -25,14 +26,25 @@ program
   .description('Bridge Feishu/Lark messenger with local CLI coding agents')
   .version(pkg.version, '-v, --version');
 
+// === bot setup ===
+
+program
+  .command('add')
+  .description('Add a new bot — scan QR code, create named config')
+  .option('--name <id>', 'bot id (auto-generated if omitted)')
+  .action(async (opts: { name?: string }) => {
+    await runAdd(opts);
+  });
+
 // === process-level commands (work directly on bridge processes) ===
 
 program
   .command('run')
   .description('Run the bridge in the foreground (was `start` in older versions)')
   .option('-c, --config <path>', 'path to config file')
+  .option('--bot <id>', 'bot id to run (uses config-<id>.json)')
   .option('--skip-check-lark-cli', 'skip lark-cli pre-flight check (auto-install + bind)')
-  .action(async (opts: { config?: string; skipCheckLarkCli?: boolean }) => {
+  .action(async (opts: { config?: string; skipCheckLarkCli?: boolean; bot?: string }) => {
     await runStart(opts);
   });
 
@@ -60,14 +72,14 @@ program
 
 program
   .command('ps')
-  .description('List running bridge processes on this machine')
+  .description('List all configured bots and their running status')
   .action(() => {
-    runPs();
+    void runBotsList();
   });
 
 program
   .command('kill <target>')
-  .description('Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s). Was `stop <target>` in older versions.')
+  .description('Kill a running bridge process by short id or list index (SIGTERM, then SIGKILL after 2s).')
   .action(async (target: string) => {
     await runKillCli(target);
   });
@@ -77,37 +89,42 @@ program
 program
   .command('start')
   .description('Install (if needed) and start the bridge as an OS-managed daemon')
+  .option('--bot <id>', 'bot id to start')
   .option('--skip-check-lark-cli', 'skip lark-cli pre-flight check (auto-install + bind)')
-  .action(async (opts: { skipCheckLarkCli?: boolean }) => {
+  .action(async (opts: { skipCheckLarkCli?: boolean; bot?: string }) => {
     await runServiceStart(opts);
   });
 
 program
   .command('stop')
   .description('Stop the OS-managed daemon (unload from launchd; plist stays)')
-  .action(async () => {
-    await runServiceStop();
+  .option('--bot <id>', 'bot id to stop')
+  .action(async (opts: { bot?: string }) => {
+    await runServiceStop(opts.bot);
   });
 
 program
   .command('restart')
   .description('Restart the OS-managed daemon')
-  .action(async () => {
-    await runServiceRestart();
+  .option('--bot <id>', 'bot id to restart')
+  .action(async (opts: { bot?: string }) => {
+    await runServiceRestart(opts.bot);
   });
 
 program
   .command('status')
   .description('Show OS service status (pid, last exit, log paths)')
-  .action(async () => {
-    await runServiceStatus();
+  .option('--bot <id>', 'bot id to check')
+  .action(async (opts: { bot?: string }) => {
+    await runServiceStatus(opts.bot);
   });
 
 program
   .command('unregister')
   .description('Remove the OS service registration (bootout + delete plist)')
-  .action(async () => {
-    await runServiceUnregister();
+  .option('--bot <id>', 'bot id to unregister')
+  .action(async (opts: { bot?: string }) => {
+    await runServiceUnregister(opts.bot);
   });
 
 const secrets = program

@@ -1,12 +1,6 @@
+import { listBots } from '../../bot/bot-registry';
 import { readAndPrune, resolveTarget, isAlive } from '../../runtime/registry';
 
-/**
- * Pretty-print the list of running lark-channel-bridge processes.
- *
- * `readAndPrune` drops dead entries but does not persist the pruned state —
- * fine for a read-only view. Persistence happens on the next `register` /
- * `unregister` / `updateEntry` call.
- */
 export function runPs(): void {
   const live = readAndPrune();
   if (live.length === 0) {
@@ -17,17 +11,86 @@ export function runPs(): void {
   const rows = live.map((e, idx) => {
     const ago = formatAgo(Date.now() - new Date(e.startedAt).getTime());
     const app = e.botName ? `${e.botName} (${e.appId})` : e.appId;
+    const botLabel = e.botId || '-';
     return {
       idx: String(idx + 1),
       id: e.id,
       pid: String(e.pid),
+      bot: botLabel,
       app,
       started: ago,
       version: e.version,
     };
   });
-  const headers = { idx: '#', id: 'ID', pid: 'PID', app: 'Bot', started: '启动', version: '版本' };
+  const headers = { idx: '#', id: 'ID', pid: 'PID', bot: 'Bot', app: 'Bot Name', started: '启动', version: '版本' };
   printTable([headers, ...rows]);
+}
+
+/** List all registered bots (running or not) with status. */
+export async function runBotsList(): Promise<void> {
+  const bots = await listBots();
+  const live = readAndPrune();
+
+  if (bots.length === 0 && live.length === 0) {
+    console.log('还没有配置任何 bot。');
+    console.log('用 `lark-channel-bridge add` 扫码创建第一个 bot。');
+    return;
+  }
+
+  // Merge: registered bots + running processes not yet in the bot registry
+  const liveBotIds = new Set(live.map((e) => e.botId).filter(Boolean) as string[]);
+  const allIds = new Set(bots.map((b) => b.id));
+
+  // Add live entries whose botId is not in the registry (e.g. newly started)
+  for (const e of live) {
+    if (e.botId && !allIds.has(e.botId)) {
+      allIds.add(e.botId);
+    }
+  }
+
+  const entries: {
+    botId: string;
+    appId?: string;
+    botName?: string;
+    tenant?: string;
+    running: boolean;
+    pid?: number;
+    processId?: string;
+    configPath?: string;
+    createdAt?: string;
+  }[] = [];
+
+  for (const id of allIds) {
+    const bot = bots.find((b) => b.id === id);
+    const proc = live.find((e) => e.botId === id);
+    entries.push({
+      botId: id,
+      appId: bot?.appId ?? proc?.appId,
+      botName: proc?.botName ?? bot?.botName,
+      tenant: bot?.tenant ?? proc?.tenant,
+      running: Boolean(proc),
+      pid: proc?.pid,
+      processId: proc?.id,
+      configPath: bot?.configPath ?? proc?.configPath,
+      createdAt: bot?.createdAt,
+    });
+  }
+
+  const runningCount = entries.filter((e) => e.running).length;
+  console.log(`# Bot 列表（${entries.length} 个已配置，${runningCount} 个运行中）\n`);
+
+  const rows = entries.map((e, idx) => ({
+    idx: String(idx + 1),
+    botId: e.botId,
+    status: e.running ? '运行中' : '已停止',
+    pid: e.running ? String(e.pid) : '-',
+    app: e.botName ? `${e.botName}` : (e.appId ? `${e.appId.slice(0, 12)}...` : '-'),
+  }));
+
+  const headers = { idx: '#', botId: 'Bot ID', status: '状态', pid: 'PID', app: 'Bot' };
+  printTable([headers, ...rows]);
+
+  console.log('\n操作: run --bot <id> | start --bot <id> | stop --bot <id> | kill <pid>');
 }
 
 export async function runKillCli(target: string | undefined): Promise<void> {
@@ -41,7 +104,7 @@ export async function runKillCli(target: string | undefined): Promise<void> {
     console.error('  用 `lark-channel-bridge ps` 看可选目标。');
     process.exit(1);
   }
-  console.log(`正在关闭 bot ${entry.id}…`);
+  console.log(`正在关闭 bot ${entry.id}...`);
   try {
     process.kill(entry.pid, 'SIGTERM');
   } catch (err) {
@@ -93,7 +156,6 @@ function printTable(rows: Record<string, string>[]): void {
 }
 
 function displayWidth(s: string): number {
-  // Approximate — CJK chars take 2 cells. Avoids pulling in wcwidth.
   let w = 0;
   for (const ch of s) {
     const code = ch.codePointAt(0) ?? 0;

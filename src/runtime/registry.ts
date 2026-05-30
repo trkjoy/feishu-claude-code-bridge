@@ -28,6 +28,8 @@ export interface ProcessEntry {
   configPath: string;
   startedAt: string;
   version: string;
+  /** Bot registry id. undefined for pre-multi-bot processes or default bot. */
+  botId?: string;
   /** Bot's display name (e.g. "尼莫"). Filled in by startChannel after the
    * WS handshake — undefined until the connection is up, or on processes
    * registered by older versions of the bridge. */
@@ -114,6 +116,7 @@ export interface RegisterArgs {
   tenant: TenantBrand;
   configPath: string;
   version: string;
+  botId?: string;
 }
 
 /**
@@ -133,6 +136,7 @@ export async function register(args: RegisterArgs): Promise<ProcessEntry> {
     configPath: args.configPath,
     startedAt: new Date().toISOString(),
     version: args.version,
+    botId: args.botId,
   };
   await writeAtomic([...live, entry], paths.processesFile);
   return entry;

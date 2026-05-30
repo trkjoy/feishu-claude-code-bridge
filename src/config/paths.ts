@@ -3,6 +3,15 @@ import { join } from 'node:path';
 
 const appDir = join(homedir(), '.lark-channel');
 
+/**
+ * Config path for a named bot. When `botId` is undefined the default
+ * config.json is returned. Named bots use config-<botId>.json.
+ */
+export function configPathFor(botId?: string): string {
+  if (!botId) return join(appDir, 'config.json');
+  return join(appDir, `config-${botId}.json`);
+}
+
 export const paths = {
   appDir,
   cacheDir: appDir,
@@ -10,6 +19,7 @@ export const paths = {
   sessionsFile: join(appDir, 'sessions.json'),
   workspacesFile: join(appDir, 'workspaces.json'),
   processesFile: join(appDir, 'processes.json'),
+  botsFile: join(appDir, 'bots.json'),
   asksDir: join(appDir, 'asks'),
   secretsFile: join(appDir, 'secrets.enc'),
   keystoreSaltFile: join(appDir, '.keystore.salt'),
