@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
@@ -12,11 +13,16 @@ import { paths } from './paths';
  *   ~/.lark-channel/.keystore.salt   — 32 random bytes, generated once
  *
  * Both files are chmod 0600. The encryption key is derived (PBKDF2-SHA256,
- * 100k iters) from `hostname + userInfo().username + salt`. This is
+ * 100k iters) from `machineId + userInfo().username + salt`, where machineId
+ * is the hardware UUID (macOS / Windows) or /etc/machine-id (Linux).
+ * Fallback to `hostname()` when platform-specific lookup fails. This is
  * **defense-in-depth against accidental disclosure** (backups, git commits,
  * log dumps) — *not* against a same-user process actively decrypting. That
  * threat needs a real OS keychain, which is out of scope for this bridge
  * given lark-cli already terminates secrets in its own keychain on bind.
+ *
+ * Migration: secrets encrypted with the pre-0.1.34 `hostname`-based seed are
+ * auto-migrated to the stable machine-id seed on first successful decrypt.
  */
 
 const KEY_LEN = 32;
@@ -24,6 +30,44 @@ const IV_LEN = 12; // GCM standard
 const TAG_LEN = 16; // GCM auth tag
 const PBKDF2_ITER = 100_000;
 const FILE_VERSION = 1;
+
+function getMachineId(): string {
+  if (process.platform === 'darwin') {
+    const uuid = execSync(
+      "ioreg -rd1 -c IOPlatformExpertDevice | awk '/IOPlatformUUID/ {print $3}'",
+      { encoding: 'utf8', timeout: 3_000 },
+    ).trim();
+    // ioreg output wraps in quotes, e.g. "1234..." → strip them
+    return uuid.replace(/^"(.*)"$/, '$1') || hostname();
+  }
+  if (process.platform === 'linux') {
+    try {
+      return execSync('cat /etc/machine-id 2>/dev/null || cat /var/lib/dbus/machine-id 2>/dev/null', {
+        encoding: 'utf8',
+        timeout: 3_000,
+      }).trim();
+    } catch {
+      // fall through
+    }
+  }
+  if (process.platform === 'win32') {
+    try {
+      return execSync(
+        'reg query HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid',
+        { encoding: 'utf8', timeout: 3_000 },
+      )
+        .split('\n')
+        .find((line) => line.includes('MachineGuid'))
+        ?.split('REG_SZ')
+        ?.pop()
+        ?.trim()
+        || hostname();
+    } catch {
+      // fall through
+    }
+  }
+  return hostname();
+}
 
 interface Envelope {
   /** base64 of 12-byte IV */
@@ -83,7 +127,17 @@ async function loadOrCreateSalt(): Promise<Buffer> {
   return salt;
 }
 
+let _machineId: string | undefined;
+
 async function deriveKey(): Promise<Buffer> {
+  const salt = await loadOrCreateSalt();
+  if (_machineId === undefined) _machineId = getMachineId();
+  const seed = `${_machineId}|${userInfo().username}`;
+  return pbkdf2Sync(seed, salt, PBKDF2_ITER, KEY_LEN, 'sha256');
+}
+
+/** Pre-0.1.34 key derivation using hostname (unstable on macOS). */
+async function deriveLegacyKey(): Promise<Buffer> {
   const salt = await loadOrCreateSalt();
   const seed = `${hostname()}|${userInfo().username}`;
   return pbkdf2Sync(seed, salt, PBKDF2_ITER, KEY_LEN, 'sha256');
@@ -114,14 +168,25 @@ function decrypt(key: Buffer, env: Envelope): string {
 }
 
 /** Look up an entry by id (e.g. "app-cli_xxx"). Returns plaintext or
- * `undefined` when not present. Errors (decryption failure, invalid file)
- * propagate. */
+ * `undefined` when not present. Secrets encrypted with the pre-0.1.34
+ * hostname-based key are auto-migrated to the stable machine-id key. */
 export async function getSecret(id: string): Promise<string | undefined> {
   const store = await readStore();
   const env = store.entries[id];
   if (!env) return undefined;
+
   const key = await deriveKey();
-  return decrypt(key, env);
+  try {
+    return decrypt(key, env);
+  } catch {
+    // Pre-0.1.34 secrets were encrypted with a hostname-based key.
+    // If we can still derive that key (same hostname as before),
+    // decrypt and re-encrypt with the stable machine-id key.
+    const legacyKey = await deriveLegacyKey();
+    const plaintext = decrypt(legacyKey, env);
+    await setSecret(id, plaintext);
+    return plaintext;
+  }
 }
 
 /** Store / overwrite the secret for `id`. */
