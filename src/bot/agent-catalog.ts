@@ -9,7 +9,7 @@ export function agentsDir(): string {
 
 /** Strip a leading YAML frontmatter block (--- ... ---); trim the rest. */
 export function stripFrontmatter(md: string): string {
-  const m = /^---\n[\s\S]*?\n---\n?/.exec(md);
+  const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md);
   return (m ? md.slice(m[0].length) : md).trim();
 }
 

@@ -16,6 +16,13 @@ describe('stripFrontmatter', () => {
   it('returns the input trimmed when there is no frontmatter', () => {
     expect(stripFrontmatter('no front\nmatter\n')).toBe('no front\nmatter');
   });
+  it('handles CRLF line endings', () => {
+    const md = '---\r\nname: x\r\n---\r\n\r\nBODY 1\r\nBODY 2\r\n';
+    expect(stripFrontmatter(md)).toBe('BODY 1\r\nBODY 2');
+  });
+  it('strips frontmatter even with no trailing newline after the closing fence', () => {
+    expect(stripFrontmatter('---\nname: x\n---')).toBe('');
+  });
 });
 
 describe('listAgents / readAgentPersona', () => {
