@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import pkg from '../../package.json';
 import { runAdd } from './commands/add';
 import { runAsk } from './commands/ask';
+import { runRole } from './commands/role';
 import { runMigrate } from './commands/migrate';
 import { runKillCli, runBotsList } from './commands/ps';
 import {
@@ -36,6 +37,17 @@ program
   .option('--skills <list>', 'comma-separated preferred skill names')
   .action(async (opts: { name?: string; agent?: string; skills?: string }) => {
     await runAdd(opts);
+  });
+
+program
+  .command('role <botId>')
+  .description("Show or set a bot's bound team role (persona + preferred skills)")
+  .option('--agent <name>', 'bind/replace with this agent (snapshot persona)')
+  .option('--skills <list>', 'comma-separated preferred skill names')
+  .option('--refresh', 're-snapshot persona from the currently bound agent')
+  .option('--clear', 'remove the bound role (back to default BRIDGE role)')
+  .action(async (botId: string, opts: { agent?: string; skills?: string; refresh?: boolean; clear?: boolean }) => {
+    await runRole(botId, opts);
   });
 
 // === process-level commands (work directly on bridge processes) ===
