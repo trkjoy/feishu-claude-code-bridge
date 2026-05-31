@@ -30,9 +30,11 @@ program
 
 program
   .command('add')
-  .description('Add a new bot — scan QR code, create named config')
+  .description('Add a new bot — scan QR code, create named config, optionally bind a team role')
   .option('--name <id>', 'bot id (auto-generated if omitted)')
-  .action(async (opts: { name?: string }) => {
+  .option('--agent <name>', 'bind a standard-team agent role (snapshot persona)')
+  .option('--skills <list>', 'comma-separated preferred skill names')
+  .action(async (opts: { name?: string; agent?: string; skills?: string }) => {
     await runAdd(opts);
   });
 
