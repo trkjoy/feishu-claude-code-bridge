@@ -162,6 +162,22 @@ export interface AppPreferences {
 }
 
 /**
+ * A bot's bound role: a snapshot of a standard-team agent persona plus a list
+ * of preferred Claude Code skill names. Snapshotted at bind time so runtime
+ * never depends on ~/.claude/agents existing. See bot-agent-role-binding spec.
+ */
+export interface BotRole {
+  /** Source agent name — provenance only, used by `role --refresh`. */
+  agent: string;
+  /** Snapshot of the agent .md body (frontmatter stripped) at bind time. */
+  systemPrompt: string;
+  /** Preferred Claude Code skill names, injected as prompt-level guidance. */
+  skills?: string[];
+  /** ISO timestamp of the bind. */
+  boundAt: string;
+}
+
+/**
  * Top-level config shape on disk.
  *
  * `accounts` is a namespace for credential-flavored fields (currently just
@@ -175,6 +191,8 @@ export interface AppConfig {
   };
   secrets?: SecretsConfig;
   preferences?: AppPreferences;
+  /** Optional bound role (persona + skill hints). See BotRole. */
+  role?: BotRole;
 }
 
 export function isComplete(cfg: Partial<AppConfig>): cfg is AppConfig {
@@ -346,4 +364,20 @@ export function getRunIdleTimeoutMs(cfg: AppConfig): number | undefined {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
   const clamped = Math.min(Math.max(Math.floor(raw), 1), 120);
   return clamped * 60_000;
+}
+
+/**
+ * Format the bound role into a system-prompt section appended after the base
+ * BRIDGE_SYSTEM_PROMPT. Returns '' when no role is set (→ no injection,
+ * current behavior).
+ */
+export function getRoleSystemPrompt(cfg: AppConfig): string {
+  const role = cfg.role;
+  if (!role || !role.systemPrompt.trim()) return '';
+  const skills = role.skills?.filter((s) => s.trim()) ?? [];
+  const skillBlock =
+    skills.length > 0
+      ? `\n\n## 你具备并应优先使用的技能\n${skills.map((s) => `- ${s}`).join('\n')}`
+      : '';
+  return `# 你的角色\n\n${role.systemPrompt.trim()}${skillBlock}`;
 }
