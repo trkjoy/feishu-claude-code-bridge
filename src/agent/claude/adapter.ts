@@ -10,6 +10,8 @@ import { translateEvent } from './stream-json';
 
 export interface ClaudeAdapterOptions {
   binary?: string;
+  /** Per-bot role persona + skill hints, appended after BRIDGE_SYSTEM_PROMPT. */
+  extraSystemPrompt?: string;
 }
 
 type ClaudeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -184,16 +186,26 @@ lark-channel-bridge ask --chat-id <bridge_context.chat_id> --operator-open-id <b
 
 const BRIDGE_SYSTEM_PROMPT = `${BRIDGE_SYSTEM_PROMPT_BASE}\n${BRIDGE_ASK_PROMPT}`;
 
+/** Compose the --append-system-prompt value: the base bridge prompt, then the
+ * optional per-bot role section. Pure — unit tested. */
+export function buildAppendSystemPrompt(extra?: string): string {
+  return extra && extra.trim()
+    ? `${BRIDGE_SYSTEM_PROMPT}\n\n${extra}`
+    : BRIDGE_SYSTEM_PROMPT;
+}
+
 export class ClaudeAdapter implements AgentAdapter {
   readonly id = 'claude';
   readonly displayName = 'Claude Code';
 
   private readonly binary: string;
   private readonly resolvedBinary: string;
+  private readonly extraSystemPrompt?: string;
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.binary = opts.binary ?? 'claude';
     this.resolvedBinary = resolveClaudeBinaryForSpawn(this.binary);
+    this.extraSystemPrompt = opts.extraSystemPrompt;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -214,7 +226,7 @@ export class ClaudeAdapter implements AgentAdapter {
       '--permission-mode',
       opts.permissionMode ?? 'bypassPermissions',
       '--append-system-prompt',
-      BRIDGE_SYSTEM_PROMPT,
+      buildAppendSystemPrompt(this.extraSystemPrompt),
     ];
     if (opts.sessionId) args.push('--resume', opts.sessionId);
     if (opts.model) args.push('--model', opts.model);

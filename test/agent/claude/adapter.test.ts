@@ -2,7 +2,23 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveClaudeBinaryForSpawn } from '../../../src/agent/claude/adapter';
+import { resolveClaudeBinaryForSpawn, buildAppendSystemPrompt } from '../../../src/agent/claude/adapter';
+
+describe('buildAppendSystemPrompt', () => {
+  it('returns the base prompt unchanged when no role is given', () => {
+    const base = buildAppendSystemPrompt();
+    expect(base).toContain('lark-channel-bridge 运行约定');
+    expect(buildAppendSystemPrompt('')).toBe(base);
+    expect(buildAppendSystemPrompt('   ')).toBe(base);
+  });
+  it('appends the role section after the base prompt', () => {
+    const base = buildAppendSystemPrompt();
+    const withRole = buildAppendSystemPrompt('# 你的角色\n\nYou build APIs.');
+    expect(withRole.startsWith(base)).toBe(true);
+    expect(withRole).toContain('You build APIs.');
+    expect(withRole.length).toBeGreaterThan(base.length);
+  });
+});
 
 interface ShimFixture {
   root: string;
