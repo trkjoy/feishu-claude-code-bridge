@@ -870,6 +870,7 @@ async function submitAccount(ctx: CommandContext): Promise<void> {
         appId,
         tenant,
         ctx.controls.cfg.preferences,
+        ctx.controls.cfg.role,
       );
       await setSecret(secretKeyForApp(appId), appSecret);
       await saveConfig(newCfg, configPath);

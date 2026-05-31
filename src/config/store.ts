@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { paths } from './paths';
-import type { AppConfig, AppPreferences, TenantBrand } from './schema';
+import type { AppConfig, AppPreferences, BotRole, TenantBrand } from './schema';
 import { secretKeyForApp } from './schema';
 
 export async function loadConfig(path: string = paths.configFile): Promise<Partial<AppConfig>> {
@@ -39,6 +39,7 @@ export async function buildEncryptedAccountConfig(
   appId: string,
   tenant: TenantBrand,
   preferences?: AppPreferences,
+  role?: BotRole,
 ): Promise<AppConfig> {
   const wrapperPath = await ensureSecretsGetterWrapper();
   return {
@@ -64,6 +65,7 @@ export async function buildEncryptedAccountConfig(
       },
     },
     ...(preferences ? { preferences } : {}),
+    ...(role ? { role } : {}),
   };
 }
 

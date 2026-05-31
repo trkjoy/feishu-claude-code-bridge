@@ -351,6 +351,7 @@ async function maybeMigratePlaintextSecret(
         cfg.accounts.app.id,
         cfg.accounts.app.tenant,
         cfg.preferences,
+        cfg.role,
       );
       await setSecret(secretKeyForApp(cfg.accounts.app.id), s);
       await saveConfig(next, configPath);
@@ -382,6 +383,7 @@ async function maybeMigratePlaintextSecret(
         cfg.accounts.app.id,
         cfg.accounts.app.tenant,
         cfg.preferences,
+        cfg.role,
       );
       await saveConfig(next, configPath);
       console.log('🔒 已把 secrets provider 切到 wrapper 形态');
@@ -415,6 +417,7 @@ async function persistEncrypted(cfg: AppConfig, configPath: string): Promise<App
     cfg.accounts.app.id,
     cfg.accounts.app.tenant,
     cfg.preferences,
+    cfg.role,
   );
   await setSecret(secretKeyForApp(cfg.accounts.app.id), s);
   await saveConfig(next, configPath);
