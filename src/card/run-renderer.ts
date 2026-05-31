@@ -1,5 +1,6 @@
 import type { Block, FooterStatus, RunState, ToolEntry } from './run-state';
 import { toolBodyMd, toolHeaderText } from './tool-render';
+import { isTeamDispatch, teamCardBody, teamCardHeader } from './team-render';
 
 const REASONING_MAX = 1500;
 const COLLAPSE_TOOL_THRESHOLD = 3;
@@ -12,7 +13,11 @@ interface TextGroup {
   kind: 'text';
   content: string;
 }
-type Group = ToolGroup | TextGroup;
+interface TeamGroup {
+  kind: 'team';
+  tool: ToolEntry;
+}
+type Group = ToolGroup | TextGroup | TeamGroup;
 
 export function renderCard(state: RunState): object {
   const elements: object[] = [];
@@ -26,6 +31,8 @@ export function renderCard(state: RunState): object {
       if (group.content.trim()) {
         elements.push(markdown(group.content));
       }
+    } else if (group.kind === 'team') {
+      elements.push(teamRoleCard(group.tool, state.terminal === 'running'));
     } else {
       elements.push(...renderToolGroup(group.tools, state.terminal !== 'running'));
     }
@@ -57,16 +64,22 @@ export function renderCard(state: RunState): object {
   };
 }
 
-function* groupBlocks(blocks: Block[]): Generator<Group> {
+export function* groupBlocks(blocks: Block[]): Generator<Group> {
   let toolBuf: ToolEntry[] = [];
   for (const b of blocks) {
-    if (b.kind === 'tool') {
+    // Subagent dispatches escape the generic-tool buffer so each renders as
+    // its own team role card (never folded into the >=3-tool collapse).
+    if (b.kind === 'tool' && !isTeamDispatch(b.tool)) {
       toolBuf.push(b.tool);
+      continue;
+    }
+    if (toolBuf.length > 0) {
+      yield { kind: 'tools', tools: toolBuf };
+      toolBuf = [];
+    }
+    if (b.kind === 'tool') {
+      yield { kind: 'team', tool: b.tool };
     } else {
-      if (toolBuf.length > 0) {
-        yield { kind: 'tools', tools: toolBuf };
-        toolBuf = [];
-      }
       yield { kind: 'text', content: b.content };
     }
   }
@@ -106,6 +119,17 @@ function toolPanel(tool: ToolEntry, expanded: boolean): object {
     expanded,
     border: tool.status === 'error' ? 'red' : 'grey',
     body: toolBodyMd(tool) || '_无输出_',
+  });
+}
+
+/** Glass-room role card for a subagent dispatch (Task/Agent). Expanded while
+ * the dispatch is still running so you can watch the team work live. */
+function teamRoleCard(tool: ToolEntry, runActive: boolean): object {
+  return collapsiblePanel({
+    title: teamCardHeader(tool),
+    expanded: runActive && tool.status === 'running',
+    border: tool.status === 'error' ? 'red' : 'blue',
+    body: teamCardBody(tool),
   });
 }
 
