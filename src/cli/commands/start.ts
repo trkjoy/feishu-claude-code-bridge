@@ -9,7 +9,7 @@ import type { Controls } from '../../commands';
 import { setSecret } from '../../config/keystore';
 import { paths } from '../../config/paths';
 import type { AppConfig } from '../../config/schema';
-import { isComplete, secretKeyForApp } from '../../config/schema';
+import { isComplete, secretKeyForApp, getRoleSystemPrompt } from '../../config/schema';
 import {
   buildEncryptedAccountConfig,
   ensureSecretsGetterWrapper,
@@ -29,6 +29,7 @@ import {
   type ProcessEntry,
 } from '../../runtime/registry';
 import { ensureDefaultBotEntry, getBot } from '../../bot/bot-registry';
+import { maybeAttachDefaultRole } from '../../bot/default-role';
 import { SessionStore } from '../../session/store';
 import { WorkspaceStore } from '../../workspace/store';
 
@@ -106,7 +107,25 @@ export async function runStart(opts: StartOptions): Promise<void> {
     hostname: os.hostname(),
   });
 
-  const agent = new ClaudeAdapter();
+  // 5-A: the default bot adopts the orchestrator persona on first run, when
+  // available. Idempotent — never overwrites an existing role.
+  const isDefaultBot = configPath === paths.configFile;
+  const attached = await maybeAttachDefaultRole(cfg, isDefaultBot, new Date().toISOString());
+  if (attached.bound) {
+    cfg = attached.cfg;
+    await saveConfig(
+      await buildEncryptedAccountConfig(
+        cfg.accounts.app.id,
+        cfg.accounts.app.tenant,
+        cfg.preferences,
+        cfg.role,
+      ),
+      configPath,
+    );
+    console.log('🎭 默认 bot 已绑定 orchestrator 角色');
+  }
+
+  const agent = new ClaudeAdapter({ extraSystemPrompt: getRoleSystemPrompt(cfg) });
   if (!(await agent.isAvailable())) {
     console.error('✗ 未找到 claude CLI。请先安装 Claude Code：');
     console.error('  https://docs.anthropic.com/en/docs/claude-code/quickstart');
