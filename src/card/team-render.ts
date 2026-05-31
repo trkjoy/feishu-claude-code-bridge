@@ -22,6 +22,7 @@ const ROLE_LABELS: Record<string, string> = {
 const HEADER_DESC_MAX = 80;
 const BODY_TASK_MAX = 400;
 const BODY_OUTPUT_MAX = 1000;
+const TIMELINE_DESC_MAX = 60;
 
 /** Whether a tool entry is a subagent dispatch (rendered as a team role card). */
 export function isTeamDispatch(tool: ToolEntry): boolean {
@@ -73,4 +74,21 @@ export function teamCardBody(tool: ToolEntry): string {
     parts.push('_派发中…_');
   }
   return parts.join('\n\n') || '_无内容_';
+}
+
+/**
+ * Top-of-card team roster: one line per dispatched agent (status + role, plus a
+ * short description while running). Returns '' when there are no dispatches, so
+ * normal runs render no team panel. Only already-dispatched agents appear —
+ * future phases aren't knowable from the stream.
+ */
+export function teamTimeline(tools: ToolEntry[]): string {
+  if (tools.length === 0) return '';
+  const lines = tools.map((t) => {
+    const icon = statusIcon(t.status);
+    const label = roleLabel(field(t.input, 'subagent_type'));
+    const desc = t.status === 'running' ? oneLine(field(t.input, 'description'), TIMELINE_DESC_MAX) : '';
+    return desc ? `${icon} ${label} — ${desc}` : `${icon} ${label}`;
+  });
+  return `**🏗️ 团队进度**\n${lines.join('\n')}`;
 }

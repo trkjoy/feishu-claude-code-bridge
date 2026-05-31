@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { groupBlocks } from '../../src/card/run-renderer';
-import type { Block, ToolEntry } from '../../src/card/run-state';
+import { groupBlocks, renderCard } from '../../src/card/run-renderer';
+import type { Block, RunState, ToolEntry } from '../../src/card/run-state';
 
 function toolBlock(name: string, id: string): Block {
   const tool: ToolEntry = { id, name, input: { subagent_type: 'qa-automator' }, status: 'running' };
@@ -32,5 +32,21 @@ describe('groupBlocks', () => {
     const groups = [...groupBlocks(blocks)];
     expect(groups).toHaveLength(1);
     expect(groups[0]?.kind === 'tools' && groups[0].tools).toHaveLength(3);
+  });
+});
+
+function stateWith(blocks: Block[]): RunState {
+  return { blocks, reasoning: { content: '', active: false }, footer: null, terminal: 'done' };
+}
+
+describe('renderCard team roster', () => {
+  it('renders the team-progress roster at the top when dispatches exist', () => {
+    const card = renderCard(stateWith([toolBlock('Task', 'a'), textBlock('结果')]));
+    const json = JSON.stringify(card);
+    expect(json).toContain('团队进度');
+  });
+  it('renders no team roster for a normal run without dispatches', () => {
+    const card = renderCard(stateWith([toolBlock('Bash', 'x'), textBlock('hi')]));
+    expect(JSON.stringify(card)).not.toContain('团队进度');
   });
 });

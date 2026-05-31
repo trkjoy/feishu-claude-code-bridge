@@ -1,6 +1,6 @@
 import type { Block, FooterStatus, RunState, ToolEntry } from './run-state';
 import { toolBodyMd, toolHeaderText } from './tool-render';
-import { isTeamDispatch, teamCardBody, teamCardHeader } from './team-render';
+import { isTeamDispatch, teamCardBody, teamCardHeader, teamTimeline } from './team-render';
 
 const REASONING_MAX = 1500;
 const COLLAPSE_TOOL_THRESHOLD = 3;
@@ -21,6 +21,16 @@ type Group = ToolGroup | TextGroup | TeamGroup;
 
 export function renderCard(state: RunState): object {
   const elements: object[] = [];
+
+  // Glass-room roster: a top-of-card summary of every dispatched agent, shown
+  // only when this run actually dispatched subagents (normal runs unaffected).
+  const dispatches: ToolEntry[] = [];
+  for (const b of state.blocks) {
+    if (b.kind === 'tool' && isTeamDispatch(b.tool)) dispatches.push(b.tool);
+  }
+  if (dispatches.length > 0) {
+    elements.push(markdown(teamTimeline(dispatches)));
+  }
 
   if (state.reasoning.content) {
     elements.push(reasoningPanel(state.reasoning.content, state.reasoning.active));

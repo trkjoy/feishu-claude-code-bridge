@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTeamDispatch, roleLabel, teamCardHeader, teamCardBody } from '../../src/card/team-render';
+import { isTeamDispatch, roleLabel, teamCardHeader, teamCardBody, teamTimeline } from '../../src/card/team-render';
 import type { ToolEntry } from '../../src/card/run-state';
 
 function tool(over: Partial<ToolEntry>): ToolEntry {
@@ -57,5 +57,25 @@ describe('teamCardBody', () => {
     const b = teamCardBody(tool({ status: 'error', input: { description: 'x' }, output: 'boom' }));
     expect(b).toContain('**失败**');
     expect(b).toContain('boom');
+  });
+});
+
+describe('teamTimeline', () => {
+  it('returns empty string for no dispatches', () => {
+    expect(teamTimeline([])).toBe('');
+  });
+  it('lists one line per agent with status icon and role', () => {
+    const out = teamTimeline([
+      tool({ id: '1', status: 'done', input: { subagent_type: 'product-manager' } }),
+      tool({ id: '2', status: 'running', input: { subagent_type: 'backend-architect', description: '实现登录接口' } }),
+    ]);
+    expect(out).toContain('🏗️ 团队进度');
+    expect(out).toContain('✅ 🧑‍💼 产品经理');
+    expect(out).toContain('⏳ ⚙️ 后端工程师 — 实现登录接口');
+  });
+  it('omits the description for non-running agents', () => {
+    const out = teamTimeline([tool({ id: '1', status: 'done', input: { subagent_type: 'qa-automator', description: '写测试' } })]);
+    expect(out).toContain('✅ 🧪 QA 工程师');
+    expect(out).not.toContain('写测试');
   });
 });
